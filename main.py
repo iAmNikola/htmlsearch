@@ -1,9 +1,7 @@
-from parser import Parser
-import os
+from html_parser import *
 from trie import Trie
 from graph import Graph
 from _collections import OrderedDict
-import sys
 
 
 # Svaki cvor (VERTEX) ce kao svoj elemenat imati recnik, ciji ce kljuc biti naziv fajla, a vrednost ce biti njegov Trie
@@ -14,578 +12,557 @@ import sys
 # broj linkova u nekom fajlu je 218, 217 ??!?!?!
 # moguce je koriscenje graf.vertices() umesto objekti_cvorova, kasno sam primetio da ta metoda postoji :/
 
-reci_za_autocomplete = []
+GREEN = "\033[92m"
+ENDC = '\033[0m'
+words_autocomplete = []
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SEPARATOR = os.path.sep
 parser = Parser()
 # Usmeren graf
 graf_fajlova = Graph(True)
-linkovi_fajlova = {}
+file_links_dict = {}
 objekti_cvorova = {}
 
 
-def pocetak_programa():
-    ucitaj_sve_fajlove(BASE_DIR + SEPARATOR + "html_fajlovi")
-    upisi_edgeove()
+def start_app():
+    load_files(BASE_DIR + SEPARATOR + "python-3.8.3-docs-html")
+    fill_edges()
     print("Broj cvorova je : ", graf_fajlova.vertex_count())
     print("Broj ivica je : ", graf_fajlova.edge_count())
-
     cui()
 
 
+def load_files(path):
+    # ucitavanje svih HTML fajlova
+    # stavljanje u Graph i Trie
+
+    for file in os.listdir(path):
+        if file.startswith("."):
+            continue
+        if file.endswith(".html"):
+            filepath = path + SEPARATOR + file
+            file_links, word_list = parser.parse(filepath)
+            if not word_list:  # ako je prazan fajl
+                continue
+            fill_autocomplete(word_list)
+            filename = return_filename(filepath)
+
+            # vrati podatke za Edges (ivice)
+            link_filenames = get_link_filenames(file_links)
+            file_links_dict[filename] = link_filenames
+
+            # stvori Trie za date reci
+            file_trie = fill_trie(word_list, filename)
+
+            # Vertex (cvor)
+            vertex_elem = {filename: file_trie}
+            vertex = graf_fajlova.insert_vertex(vertex_elem)
+            objekti_cvorova[filename] = vertex
+        elif not os.path.isfile(path + SEPARATOR + file) and not (re.search("^.*.(js|JS|inv|INV|doc|DOC|pdf|PDF)$", file)):
+            load_files(path + SEPARATOR + file)
+
+def fill_autocomplete(word_list):
+    for word in word_list:
+        if word.lower() not in words_autocomplete:
+            words_autocomplete.append(word.lower())
+
+def return_filename(filepath):
+    split_filepath = filepath.split(SEPARATOR)
+    return split_filepath[-1]
+
+def get_link_filenames(file_links):
+    link_filename = []
+    for link in file_links:
+        split_link = link.split(SEPARATOR)
+        if split_link[-1] not in link_filename:
+            link_filename.append(split_link[-1])
+    return link_filename
+
+def fill_trie(word_list, filename):
+    trie = Trie()
+    for i in range(len(word_list)):  # mora po indeksu da bih znao gde je data rec u listi
+        if not word_list[i]:
+            continue
+        word = word_list[i].lower()
+        surrounding_words = get_surrounding_words(word_list, i)
+        trie.insert(word, filename, surrounding_words)
+    return trie
+
+def get_surrounding_words(word_list, index):
+    i = index
+    surrounding_words = []
+
+    # okruzenje reci je lista reci koje su oko te reci u HTML fajlu, povratna vrednost - lista reci
+
+    if i in range(len(word_list) - 20, len(word_list)):
+        for j in range(len(word_list) - 20, len(word_list)):
+            surrounding_words.append(word_list[j])
+        return surrounding_words
+
+    else:
+        for j in range(i, i + 20):
+            surrounding_words.append(word_list[j])
+        return surrounding_words
+
+
+def fill_edges():
+    for key in file_links_dict.keys():
+        for link_filename in file_links_dict[key]:
+            if link_filename in objekti_cvorova:
+                graf_fajlova.insert_edge(objekti_cvorova[key], objekti_cvorova[link_filename], link_filename)
+
+
 def cui():
-    print("Dobrodosli u search engine.")
     while True:
-        print("Odaberite opciju pretrazivanja: ")
-        print("0 - standardno pretrazivanje (Unos reci i logickih operatera)")
-        print("1 - upotreba fraza")
-        print("2 - autocomplete")
-        print("3 - izlazak")
-        odabir_pretrage = input()
-        if odabir_pretrage == "0":
-            unos_reci_pretrazivanja()
-        elif odabir_pretrage == "1":
-            unos_fraza()
-        elif odabir_pretrage == "2":
-            unos_autocomplete()
-        elif odabir_pretrage == "3":
-            sys.exit(0)
-        else:
-            print("Neispravan unos!")
+        menu_print()
+        func = choose_option()
+        func()
 
+def menu_print():
+    print("1. Standardno pretrazivanje (Unos reci i logickih operatera)\n"
+          "2. Upotreba fraza\n"
+          "3. Autocomplete\n"
+          "4. Izlazak")
 
-def unos_autocomplete():
-    uneti_prefiks = input("Unesite prefiks za koji hocete da se obavi autocomplete: ")
+def choose_option():
+    choices = {"1": search_input,
+               "2": phrase_input,
+               "3": autocomplete_input,
+               "4": quit
+               }
     while True:
-        broj_reci_za_prikaz = input("Unesite koliko reci zelite da vam se prikaze: ")
-        if not broj_reci_za_prikaz.isnumeric():
-            print("Neispravan unos broja reci.")
+        choice = input("Izaberite opciju: ")
+        attribute = choices.get(choice)
+        if attribute:
+            return attribute
         else:
-            lista_reci = pronadji_autocomplete(uneti_prefiks, broj_reci_za_prikaz)
-            ispisi_autocomplete(lista_reci)
-            break
+            print("{0} nije validan izbor.".format(choice))
 
 
-def ispisi_autocomplete(lista_reci):
-    print("Pronadjene reci: ")
-    for rec in lista_reci:
-        print(rec)
-    print("-----------------")
+def phrase_input():
+    words = []
+    phrase = input("Unesite frazu za pretrazivanje: ")
+    phrase_words = phrase.split(" ")
+    for i in range(len(phrase_words)):
+        words.append(phrase_words[i].lower())
+    search_phrase(words)
 
 
-def pronadji_autocomplete(uneti_prefiks, broj_reci_za_prikaz):
-    lista_reci = []
-    prefiks_za_pretragu = uneti_prefiks.lower()
-    for rec in reci_za_autocomplete:
-        if (rec.startswith(prefiks_za_pretragu)) and (rec not in lista_reci):
-            lista_reci.append(rec)
-            if len(lista_reci) == int(broj_reci_za_prikaz):
-                break
-    return lista_reci
-
-
-def unos_fraza():
-    reci_fraze_lower = []
-    fraza = input("Unesite frazu za pretrazivanje: ")
-    reci_fraze = fraza.split(" ")
-    for i in range(len(reci_fraze)):
-        reci_fraze_lower.append(reci_fraze[i].lower())
-    pretrazi_frazu(reci_fraze_lower)
-
-
-def pretrazi_frazu(reci_fraze):
-    recnik_pronadjenih_fraza = {}
-    rec_za_pretragu = reci_fraze[0]
+def search_phrase(words):
+    found_phrases = {}
+    search_word = words[0]
     for key in objekti_cvorova:
-        trie_cvora = (objekti_cvorova[key]._element)[key]
-        broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec_za_pretragu)
-        broj_fraza = 0
-        lista_vec_obidjenih_okolina = []
-        for jedno_okruzenje in okruzenje_unesene_reci_u_fajlu:
-            if jedno_okruzenje not in lista_vec_obidjenih_okolina:
-                lista_vec_obidjenih_okolina.append(jedno_okruzenje)
-                for i in range(len(jedno_okruzenje)):
-                    if jedno_okruzenje[i].lower() == rec_za_pretragu:
-                        fraza_je_pronadjena = True
-                        for j in range(1, len(reci_fraze)):
-                            if i + j not in range(len(jedno_okruzenje)):
-                                fraza_je_pronadjena = False
+        vertex_trie = objekti_cvorova[key]._element[key]
+        _, surrounding_words = vertex_trie.search(search_word)
+        num_phrases = 0
+        iterated_surrounding = []
+        for surr_word in surrounding_words:
+            if surr_word not in iterated_surrounding:
+                iterated_surrounding.append(surr_word)
+                for i in range(len(surr_word)):
+                    if surr_word[i].lower() == search_word:
+                        phrase_found = True
+                        for j in range(1, len(words)):
+                            if i + j not in range(len(surr_word)):
+                                phrase_found = False
                                 break
-                            if reci_fraze[j] != jedno_okruzenje[i + j]:
-                                fraza_je_pronadjena = False
+                            if words[j] != surr_word[i + j]:
+                                phrase_found = False
                                 break
-                        if fraza_je_pronadjena:
-                            broj_fraza += 1
-        recnik_pronadjenih_fraza[key] = broj_fraza
-    ispisi_rezultate_fraza(recnik_pronadjenih_fraza)
+                        if phrase_found:
+                            num_phrases += 1
+        found_phrases[key] = num_phrases
+    print_phrase_result(found_phrases)
 
 
-def ispisi_rezultate_fraza(recnik_pronadjenih_fraza):
-    sortirani_recnik = OrderedDict(sorted(recnik_pronadjenih_fraza.items(), key=lambda x: x[1]))
-    for key in sortirani_recnik:
-        if sortirani_recnik[key] != 0:
-            print("U fajlu " + key + ", uneta fraza se pojavila " + str(recnik_pronadjenih_fraza[key]) + " puta.")
+def print_phrase_result(found_phrases):
+    sorted_dict = OrderedDict(sorted(found_phrases.items(), key=lambda x: x[1]))
+    for key in sorted_dict:
+        if sorted_dict[key] != 0:
+            print("U fajlu " + key + ", uneta fraza se pojavila " + str(found_phrases[key]) + " puta.")
             print("----------------------------------------------")
 
 
-def unos_reci_pretrazivanja():
-    # provera unosa
+def search_input():
     while True:
-        ispravan_unos = True
-        reci_za_pretrazivanje_string = input("Unesite reci koje zelite da pretrazite u fajlovima: ")
-        lista_reci = reci_za_pretrazivanje_string.split(" ")
-        if lista_reci[0] == "AND" or lista_reci[0] == "OR" or lista_reci[0] == "NOT":
+        valid_input = True
+        words = input("Unesite reci koje zelite da pretrazite u fajlovima: ")
+        word_list = words.split(" ")
+        if word_list[0] in ["AND", "OR", "NOT"]:
             print("Logicki operator ne moze biti na prvom mestu!")
-            ispravan_unos = False
-        elif lista_reci[len(lista_reci) - 1] == "AND" or lista_reci[len(lista_reci) - 1] == "OR" or lista_reci[
-            len(lista_reci) - 1] == "NOT":
+            continue
+        elif word_list[-1] in ["AND", "OR", "NOT"]:
             print("Logicki operator ne moze biti na poslednjem mestu!")
-            ispravan_unos = False
+            continue
         else:
-            for i in range(1, len(lista_reci)):
-                j = i - 1
-                if (lista_reci[j] == "AND" or lista_reci[j] == "OR" or lista_reci[j] == "NOT") and (
-                        lista_reci[j + 1] == "AND" or lista_reci[j + 1] == "OR" or lista_reci[j + 1] == "NOT"):
-                    print("Ne mogu dva logicka operatora stojati jedan pored drugog!")
-                    ispravan_unos = False
+            for i in range(len(word_list)-1):
+                j = i + 1
+                if (word_list[i] in ["AND", "OR", "NOT"]) and (word_list[j] in ["AND", "OR", "NOT"]):
+                    print("Dva logicka operatora ne mogu stojati jedan pored drugog!")
+                    valid_input = False
                     break
-        if ispravan_unos:
+        if valid_input:
             break
     while True:
-        broj_stranica_za_prikaz = input("Unesite broj stranica koje zelite da vam se prikazu na ekranu: ")
-        if not broj_stranica_za_prikaz.isnumeric():
-            print("Neispravan unos broja stranica za prikaz!")
-        else:
-            break
-    # recnik_reci_za_pretrazivanje, odnos_logickih_operatora_i_reci = obradi_podatke(reci_za_pretrazivanje_string)
-    spisak_reci_i_operatora = reci_za_pretrazivanje_string.split(" ")
-    pretrazi_fajlove_standardno_pretrazivanje(spisak_reci_i_operatora, broj_stranica_za_prikaz)
+        n_pages = input("Unesite broj stranica koje zelite da vam se prikazu: ")
+        if not n_pages.isnumeric():
+            print("Neispravan unos!")
+            continue
+        break
+    search_words_in_files(word_list, n_pages)
 
-
-def pretrazi_fajlove_standardno_pretrazivanje(spisak_reci_i_operatora, broj_stranica_za_prikaz):
-    # HEURISTIKA: broj_unesene_reci_u_fajlu + broj_ivica + broj_unesene_reci_u_fajlovima_koji_linkuju
+def search_words_in_files(word_list, n_pages):
+    # HEURISTIKA: 50*broj ponavljanja reci u fajlu + broj ivica + broj_unesene_reci_u_fajlovima_koji_linkuju
     # recnik_rezultata_heuristike: {rec:{naziv_fajla:[vrednost_heuristike, okolina_reci], ....}, rec2: {}}
-    if ("AND" not in spisak_reci_i_operatora) and ("NOT" not in spisak_reci_i_operatora) and (
-            "OR" not in spisak_reci_i_operatora):
-        recnik_rezultata_heuristike = {}
-        for rec in spisak_reci_i_operatora:
-            recnik_svih_fajlova = {}
+    if ("AND" not in word_list) and ("NOT" not in word_list) and ("OR" not in word_list):
+        heuristics = {}
+        for word in word_list:
+            all_files = {}
             for key in objekti_cvorova:
-                recnik_svih_fajlova[key] = []
-            recnik_rezultata_heuristike[rec] = recnik_svih_fajlova
-        for rec in spisak_reci_i_operatora:
-            for key1 in objekti_cvorova:
-                rec_za_pretragu = rec.lower()
-                trie_cvora = (objekti_cvorova[key1]._element)[key1]
-                broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec_za_pretragu)
-                generator_ivica = graf_fajlova.incident_edges(objekti_cvorova[key1], False)
-                broj_ivica = 0
-                ivice = []
-                for ivica in generator_ivica:
-                    broj_ivica += 1
-                    ivice.append(ivica)
-                svi_cvorovi_ivica = {}
-                for objekat_ivice in ivice:
-                    cvor_pocetnog_fajla_ivice = objekat_ivice._origin
-                    kljuc = list(cvor_pocetnog_fajla_ivice._element.keys())
-                    vrednost = cvor_pocetnog_fajla_ivice._element[kljuc[0]]
-                    svi_cvorovi_ivica[kljuc[0]] = vrednost
-                broj_unesene_reci_u_fajlovima_koji_linkuju = 0
-                for key2 in svi_cvorovi_ivica:
-                    trie_cvora_ivice = svi_cvorovi_ivica[key2]
-                    broj_unesene_reci_u_linkovanom_fajlu, okruzenje_unesene_reci_u_linkovanom_fajlu = trie_cvora_ivice.search(
-                        rec_za_pretragu)
-                    broj_unesene_reci_u_fajlovima_koji_linkuju += broj_unesene_reci_u_linkovanom_fajlu
-                vrednost_heuristike = 50 * broj_unesene_reci_u_fajlu + broj_ivica + broj_unesene_reci_u_fajlovima_koji_linkuju
-                if broj_unesene_reci_u_fajlu == 0:
-                    recnik_rezultata_heuristike[rec][key1].append(0)
+                all_files[key] = []
+            heuristics[word] = all_files
+        for word in word_list:
+            for k in objekti_cvorova:
+                search_word = word.lower()
+                vertex_trie = objekti_cvorova[k]._element[k]
+                num_repeats, surrounding_words = vertex_trie.search(search_word)
+                vertex_edges = graf_fajlova.incident_edges(objekti_cvorova[k], False)
+                num_edges = 0
+                edges = []
+                for edge in vertex_edges:
+                    num_edges += 1
+                    edges.append(edge)
+                edge_vertex = {}
+                for edge in edges:
+                    file_vertex = edge._origin
+                    key = list(file_vertex._element.keys())
+                    value = file_vertex._element[key[0]]  # Trie
+                    edge_vertex[key[0]] = value
+                num_repeats_all_link_files = 0
+                for key1 in edge_vertex.keys():
+                    link_file_trie = edge_vertex[key1]
+                    num_repeats_link_file, _ = link_file_trie.search(search_word)
+                    num_repeats_all_link_files += num_repeats_link_file
+                heuristic_value = 50 * num_repeats + num_edges + num_repeats_all_link_files
+                if num_repeats == 0:
+                    heuristics[word][k].append(0)
                 else:
-                    recnik_rezultata_heuristike[rec][key1].append(vrednost_heuristike)
-                recnik_rezultata_heuristike[rec][key1].append(okruzenje_unesene_reci_u_fajlu)
-        rec_nije_pronadjena = True
-        for rec in recnik_rezultata_heuristike:
-            for naziv_fajla in recnik_rezultata_heuristike[rec]:
-                if recnik_rezultata_heuristike[rec][naziv_fajla][0] > 49:
-                    rec_nije_pronadjena = False
+                    heuristics[word][k].append(heuristic_value)
+                heuristics[word][k].append(surrounding_words)
+        word_not_found = True
+        for word in heuristics:
+            for filename in heuristics[word]:
+                if heuristics[word][filename][0] > 50:
+                    word_not_found = False
                     break
-            if rec_nije_pronadjena:
-                predlozi_rec(rec)
+            if word_not_found:
+                suggest_word(word)
                 return
-        prikazi_podatke_standardnog_pretrazivanja(recnik_rezultata_heuristike, broj_stranica_za_prikaz)
+        show_search_data(heuristics, n_pages)
     else:
-        lista_pocetnih_reci = [spisak_reci_i_operatora[0], spisak_reci_i_operatora[2]]
-        if spisak_reci_i_operatora[1] == "AND":
-            nazivi_fajlova = prva_provera_AND(lista_pocetnih_reci)
-        elif spisak_reci_i_operatora[1] == "OR":
-            nazivi_fajlova = prva_provera_OR(lista_pocetnih_reci)
-        elif spisak_reci_i_operatora[1] == "NOT":
-            nazivi_fajlova = prva_provera_NOT(lista_pocetnih_reci)
-        if not nazivi_fajlova:
+        operand_words = [word_list[0], word_list[2]]
+        if word_list[1] == "AND":
+            filenames = first_AND_check(operand_words)
+        elif word_list[1] == "OR":
+            filenames = first_OR_check(operand_words)
+        else:
+            filenames = first_NOT_check(operand_words)
+        if not filenames:
             print("Ne postoji nijedan fajl sa datim kriterijumima!")
             return
         else:
-            if len(spisak_reci_i_operatora) > 3:
-                for i in range(3, len(spisak_reci_i_operatora), 2):
-                    operator = spisak_reci_i_operatora[i]
-                    rec = spisak_reci_i_operatora[i + 1]
+            if len(word_list) > 3:
+                for i in range(3, len(word_list), 2):
+                    operator = word_list[i]
+                    word = word_list[i + 1]
                     if operator == "AND":
-                        nazivi_fajlova = provera_AND(nazivi_fajlova, rec)
-                        if not nazivi_fajlova:
+                        filenames = AND_check(filenames, word)
+                        if not filenames:
                             print("Ne postoji nijedan fajl sa datim kriterijumima!")
                             return
                     elif operator == "OR":
-                        nazivi_fajlova = provera_OR(nazivi_fajlova, rec)
-                        if not nazivi_fajlova:
+                        filenames = OR_check(filenames, word)
+                        if not filenames:
                             print("Ne postoji nijedan fajl sa datim kriterijumima!")
                             return
                     elif operator == "NOT":
-                        nazivi_fajlova = provera_NOT(nazivi_fajlova, rec)
-                        if not nazivi_fajlova:
+                        filenames = NOT_check(filenames, word)
+                        if not filenames:
                             print("Ne postoji nijedan fajl sa datim kriterijumima!")
                             return
-        lista_reci = []
-        for i in range(0, len(spisak_reci_i_operatora), 2):
-            lista_reci.append(spisak_reci_i_operatora[i])
-        ispis_na_ekran_standardno_pretrazivanje_sa_operatorima(lista_reci, nazivi_fajlova, broj_stranica_za_prikaz)
+        words = []
+        for i in range(0, len(word_list), 2):
+            words.append(word_list[i])
+        show_search_data_with_operators(words, filenames, n_pages)
 
-
-def ispis_na_ekran_standardno_pretrazivanje_sa_operatorima(lista_reci, nazivi_fajlova, broj_stranica_za_prikaz):
-    recnik_rezultata_heuristike = {}
-    for rec in lista_reci:
-        recnik_svih_fajlova = {}
-        for key in objekti_cvorova:
-            for naziv_fajla in nazivi_fajlova:
-                if key == naziv_fajla:
-                    recnik_svih_fajlova[key] = []
-        recnik_rezultata_heuristike[rec] = recnik_svih_fajlova
-    for rec in lista_reci:
-        for key1 in objekti_cvorova:
-            if key1 in recnik_rezultata_heuristike[rec]:
-                rec_za_pretragu = rec.lower()
-                trie_cvora = (objekti_cvorova[key1]._element)[key1]
-                broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec_za_pretragu)
-                generator_ivica = graf_fajlova.incident_edges(objekti_cvorova[key1], False)
-                broj_ivica = 0
-                ivice = []
-                for ivica in generator_ivica:
-                    broj_ivica += 1
-                    ivice.append(ivica)
-                svi_cvorovi_ivica = {}
-                for objekat_ivice in ivice:
-                    cvor_pocetnog_fajla_ivice = objekat_ivice._origin
-                    kljuc = list(cvor_pocetnog_fajla_ivice._element.keys())
-                    vrednost = cvor_pocetnog_fajla_ivice._element[kljuc[0]]
-                    svi_cvorovi_ivica[kljuc[0]] = vrednost
-                broj_unesene_reci_u_fajlovima_koji_linkuju = 0
-                for key2 in svi_cvorovi_ivica:
-                    trie_cvora_ivice = svi_cvorovi_ivica[key2]
-                    broj_unesene_reci_u_linkovanom_fajlu, okruzenje_unesene_reci_u_linkovanom_fajlu = trie_cvora_ivice.search(
-                        rec_za_pretragu)
-                    broj_unesene_reci_u_fajlovima_koji_linkuju += broj_unesene_reci_u_linkovanom_fajlu
-                vrednost_heuristike = 50 * broj_unesene_reci_u_fajlu + broj_ivica + broj_unesene_reci_u_fajlovima_koji_linkuju
-                if broj_unesene_reci_u_fajlu == 0:
-                    recnik_rezultata_heuristike[rec][key1].append(0)
-                else:
-                    recnik_rezultata_heuristike[rec][key1].append(vrednost_heuristike)
-                recnik_rezultata_heuristike[rec][key1].append(okruzenje_unesene_reci_u_fajlu)
-                # recnik_rezultata_heuristike: {rec:{naziv_fajla:[vrednost_heuristike, okolina_reci], ....}, rec2: {}}
-    rec_nije_pronadjena = True
-    for rec in recnik_rezultata_heuristike:
-        for naziv_fajla in recnik_rezultata_heuristike[rec]:
-            if recnik_rezultata_heuristike[rec][naziv_fajla][0] > 220:
-                rec_nije_pronadjena = False
-                break
-        if rec_nije_pronadjena:
-            predlozi_rec(rec)
-            return
-    prikazi_podatke_standardnog_pretrazivanja(recnik_rezultata_heuristike, broj_stranica_za_prikaz)
-
-
-def predlozi_rec(rec):
-    lista_reci_predloga = []
-    rec_provere = rec[:-1]
-    rec_provere = rec_provere.lower()
-    for rec in reci_za_autocomplete:
-        if rec.lower().startswith(rec_provere):
-            lista_reci_predloga.append(rec)
-    if len(rec_provere) == 1:
-        return lista_reci_predloga
-    if not lista_reci_predloga:
-        predlozi_rec(rec_provere)
-    else:
-        print("Da li ste mozda mislili na sledecu/e rec/i: ")
-        for rec in lista_reci_predloga:
-            print(rec)
-        return
-
-
-def provera_AND(nazivi_fajlova, rec):
-    nazivi_fajlova_za_datu_rec = []
-    fajlovi_ispunjavajucih_kriterijuma = []
-    for key in objekti_cvorova:
-        rec = rec.lower()
-        trie_cvora = (objekti_cvorova[key]._element)[key]
-        broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec)
-        if broj_unesene_reci_u_fajlu != 0:
-            nazivi_fajlova_za_datu_rec.append(key)
-    for naziv_fajla in nazivi_fajlova_za_datu_rec:
-        if naziv_fajla in nazivi_fajlova:
-            fajlovi_ispunjavajucih_kriterijuma.append(naziv_fajla)
-    return fajlovi_ispunjavajucih_kriterijuma
-
-
-def provera_OR(nazivi_fajlova, rec):
-    nazivi_fajlova_za_datu_rec = []
-    for key in objekti_cvorova:
-        rec = rec.lower()
-        trie_cvora = (objekti_cvorova[key]._element)[key]
-        broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec)
-        if broj_unesene_reci_u_fajlu != 0:
-            nazivi_fajlova_za_datu_rec.append(key)
-    for naziv_fajla in nazivi_fajlova_za_datu_rec:
-        if naziv_fajla not in nazivi_fajlova:
-            nazivi_fajlova.append(naziv_fajla)
-    return nazivi_fajlova
-
-
-def provera_NOT(nazivi_fajlova, rec):
-    nazivi_fajlova_za_datu_rec = []
-    fajlovi_ispunjavajucih_kriterijuma = []
-    for key in objekti_cvorova:
-        rec = rec.lower()
-        trie_cvora = (objekti_cvorova[key]._element)[key]
-        broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec)
-        if broj_unesene_reci_u_fajlu == 0:
-            nazivi_fajlova_za_datu_rec.append(key)
-    for naziv_fajla in nazivi_fajlova_za_datu_rec:
-        if naziv_fajla in nazivi_fajlova:
-            fajlovi_ispunjavajucih_kriterijuma.append(naziv_fajla)
-    return fajlovi_ispunjavajucih_kriterijuma
-
-
-def prva_provera_AND(lista_reci):
-    lista_fajlova_prve_reci = []
-    lista_fajlova_druge_reci = []
-    povratna_lista_fajlova = []
-    redni_broj_reci = 0
-    for rec in lista_reci:
-        redni_broj_reci += 1
-        for key in objekti_cvorova:
-            rec_za_pretragu = rec.lower()
-            trie_cvora = (objekti_cvorova[key]._element)[key]
-            broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec_za_pretragu)
-            if broj_unesene_reci_u_fajlu != 0 and redni_broj_reci == 1:
-                lista_fajlova_prve_reci.append(key)
-            elif broj_unesene_reci_u_fajlu != 0 and redni_broj_reci == 2:
-                lista_fajlova_druge_reci.append(key)
-    for fajl1 in lista_fajlova_prve_reci:
-        for fajl2 in lista_fajlova_druge_reci:
-            if (fajl1 == fajl2) and (fajl1 not in povratna_lista_fajlova):
-                povratna_lista_fajlova.append(fajl1)
-    return povratna_lista_fajlova
-
-
-def prva_provera_OR(lista_reci):
-    lista_fajlova_prve_reci = []
-    lista_fajlova_druge_reci = []
-    povratna_lista_fajlova = []
-    redni_broj_reci = 0
-    for rec in lista_reci:
-        redni_broj_reci += 1
-        for key in objekti_cvorova:
-            rec_za_pretragu = rec.lower()
-            trie_cvora = (objekti_cvorova[key]._element)[key]
-            broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec_za_pretragu)
-            if broj_unesene_reci_u_fajlu != 0 and redni_broj_reci == 1:
-                lista_fajlova_prve_reci.append(key)
-            elif broj_unesene_reci_u_fajlu != 0 and redni_broj_reci == 2:
-                lista_fajlova_druge_reci.append(key)
-    for fajl1 in lista_fajlova_prve_reci:
-        if fajl1 not in povratna_lista_fajlova:
-            povratna_lista_fajlova.append(fajl1)
-    for fajl2 in lista_fajlova_druge_reci:
-        if fajl2 not in povratna_lista_fajlova:
-            povratna_lista_fajlova.append(fajl2)
-    return povratna_lista_fajlova
-
-
-def prva_provera_NOT(lista_reci):
-    lista_fajlova_prve_reci = []
-    lista_fajlova_druge_reci = []
-    povratna_lista_fajlova = []
-    redni_broj_reci = 0
-    for rec in lista_reci:
-        redni_broj_reci += 1
-        for key in objekti_cvorova:
-            rec_za_pretragu = rec.lower()
-            trie_cvora = (objekti_cvorova[key]._element)[key]
-            broj_unesene_reci_u_fajlu, okruzenje_unesene_reci_u_fajlu = trie_cvora.search(rec_za_pretragu)
-            if broj_unesene_reci_u_fajlu != 0 and redni_broj_reci == 1:
-                lista_fajlova_prve_reci.append(key)
-            elif broj_unesene_reci_u_fajlu == 0 and redni_broj_reci == 2:
-                lista_fajlova_druge_reci.append(key)
-    for fajl1 in lista_fajlova_prve_reci:
-        for fajl2 in lista_fajlova_druge_reci:
-            if (fajl1 == fajl2) and (fajl1 not in povratna_lista_fajlova):
-                povratna_lista_fajlova.append(fajl1)
-    return povratna_lista_fajlova
-
-
-def prikazi_podatke_standardnog_pretrazivanja(recnik_rezultata_heuristike, broj_stranica_za_prikaz):
-    redni_broj_rezultata = 1
-    recnik_ukupne_heuristike = {}
-    lista_vec_ucitanih_fajlova = []
-    for rec1 in recnik_rezultata_heuristike:
-        for naziv_fajla1 in recnik_rezultata_heuristike[rec1]:
-            recnik_ukupne_heuristike[naziv_fajla1] = 0
+def show_search_data(heuristic, n_pages):
+    result_num = 1
+    total_heuristic = {}
+    loaded_filenames = []
+    for key in heuristic:
+        for filename in heuristic[key]:
+            total_heuristic[filename] = 0
         break
-    for rec2 in recnik_rezultata_heuristike:
-        for naziv_fajla2 in recnik_rezultata_heuristike[rec2]:
-            recnik_ukupne_heuristike[naziv_fajla2] += recnik_rezultata_heuristike[rec2][naziv_fajla2][0]
-    lista_rezultata_heuristike = list(recnik_ukupne_heuristike.values())
-    ispisuj_sledecih_n_resenja = True
-    while ispisuj_sledecih_n_resenja:
-        for i in range(int(broj_stranica_za_prikaz)):
-            if int(broj_stranica_za_prikaz) > len(lista_rezultata_heuristike):
-                print("Nemoguce prikazati naredne " + broj_stranica_za_prikaz + " stranice!")
+    for key in heuristic:
+        for filename in heuristic[key]:
+            total_heuristic[filename] += heuristic[key][filename][0]
+    heuristic_value_list = list(total_heuristic.values())
+    print_n = True
+    while print_n:
+        for i in range(int(n_pages)):
+            if int(n_pages) > len(heuristic_value_list):
+                print("Nemoguce prikazati naredne " + n_pages + " stranice!")
                 return
-            max_heuristika = max(lista_rezultata_heuristike)
-            lista_rezultata_heuristike.remove(max_heuristika)
-            for naziv_fajla in recnik_ukupne_heuristike:
-                if recnik_ukupne_heuristike[
-                    naziv_fajla] == max_heuristika and naziv_fajla not in lista_vec_ucitanih_fajlova:
-                    fajl_trenutne_max_heuristike = naziv_fajla
-                    lista_vec_ucitanih_fajlova.append(naziv_fajla)
+            max_heuristika = max(heuristic_value_list)
+            heuristic_value_list.remove(max_heuristika)
+            for filename in total_heuristic:
+                if total_heuristic[filename] == max_heuristika and filename not in loaded_filenames:
+                    max_heuristic_file = filename
+                    loaded_filenames.append(filename)
                     break
-            broj_prolazaka_kroz_fajlove = 0
-            for rec3 in recnik_rezultata_heuristike:
-                for naziv_fajla3 in recnik_rezultata_heuristike[rec3]:
-                    if fajl_trenutne_max_heuristike == naziv_fajla3:
-                        broj_prolazaka_kroz_fajlove += 1
-                        isecci_za_ispis = ""
-                        lista_reci_isecaka = recnik_rezultata_heuristike[rec3][naziv_fajla3][1]
-                        for lista in lista_reci_isecaka:
-                            for i in range(len(lista)):
-                                if lista[i].lower() == rec3:
-                                    lista[i] = "==" + lista[i].upper() + "=="
-                                if i == len(lista) - 1:
-                                    isecci_za_ispis += lista[i] + "\n"
+            num_iter_files = 0
+            for word in heuristic:
+                for filename in heuristic[word]:
+                    if max_heuristic_file == filename:
+                        num_iter_files += 1
+                        print_string = ""
+                        surrounding_words = heuristic[word][filename][1]
+                        for surr_word in surrounding_words:
+                            for j in range(len(surr_word)):
+                                if surr_word[j].lower() == word:
+                                    surr_word[j] = GREEN + surr_word[j].upper() + ENDC
+                                if j == len(surr_word) - 1:
+                                    print_string += surr_word[j] + "\n"
                                 else:
-                                    isecci_za_ispis += lista[i] + " "
-                            isecci_za_ispis += "--------------------------------------------------------------\n"
-                        if not isecci_za_ispis:
-                            isecci_za_ispis += "Ne postoji zapis ove reci u datom fajlu," \
+                                    print_string += surr_word[j] + " "
+                            print_string += "--------------------------------------------------------------\n"
+                        if not print_string:
+                            print_string += "Ne postoji zapis ove reci u datom fajlu," \
                                                " ostale reci imaju ogromnu prednost u heuristici ili je operator OR koristen"
                         print("+++++++++++++++++++++++++++++++++++")
-                        print("Rec:" + rec3)
-                        print("Redni broj rezultata: " + str(redni_broj_rezultata) + ".")
-                        print("Fajl: " + fajl_trenutne_max_heuristike)
-                        print("Isecci svih pojavljivanja reci:\n" + isecci_za_ispis)
-                        if broj_prolazaka_kroz_fajlove == len(recnik_rezultata_heuristike):
-                            redni_broj_rezultata += 1
+                        print("Rec:" + word)
+                        print("Redni broj rezultata: " + str(result_num) + ".")
+                        print("Fajl: " + max_heuristic_file)
+                        print("Isecci svih pojavljivanja reci:\n" + print_string)
+                        if num_iter_files == len(heuristic):
+                            result_num += 1
         while True:
-            odabir = input("Unesite 0 ako zelite da izadjete iz ispisa, 1 ako zelite prikaz narednih N ispisa: ")
-            if odabir == "0":
-                ispisuj_sledecih_n_resenja = False
+            choice = input("Unesite 0 ako zelite da izadjete iz ispisa, 1 ako zelite prikaz narednih N ispisa: ")
+            if choice == "0":
+                print_n = False
                 break
-            if odabir == "1":
+            if choice == "1":
                 break
             else:
                 print("Neispravan unos!")
 
+def show_search_data_with_operators(words, filenames, n_pages):
+    heuristics = {}
+    for word in words:
+        all_files_dict = {}
+        for key in objekti_cvorova:
+            for filename in filenames:
+                if key == filename:
+                    all_files_dict[key] = []
+        heuristics[word] = all_files_dict
+    for word in words:
+        for k in objekti_cvorova:
+            if k in heuristics[word]:
+                search_word = word.lower()
+                vertex_trie = objekti_cvorova[k]._element[k]
+                num_repeats, surrounding_words = vertex_trie.search(search_word)
+                vertex_edges = graf_fajlova.incident_edges(objekti_cvorova[k], False)
+                num_edges = 0
+                edges = []
+                for edge in vertex_edges:
+                    num_edges += 1
+                    edges.append(edge)
+                edge_vertex = {}
+                for edge in edges:
+                    file_vertex = edge._origin
+                    key = list(file_vertex._element.keys())
+                    value = file_vertex._element[key[0]]
+                    edge_vertex[key[0]] = value
+                num_repeats_all_link_files = 0
+                for key2 in edge_vertex:
+                    link_file_trie = edge_vertex[key2]
+                    num_repeats_link_file, _ = link_file_trie.search(search_word)
+                    num_repeats_all_link_files += num_repeats_link_file
+                heuristic_value = 50 * num_repeats + num_edges + num_repeats_all_link_files
+                if num_repeats == 0:
+                    heuristics[word][k].append(0)
+                else:
+                    heuristics[word][k].append(heuristic_value)
+                heuristics[word][k].append(surrounding_words)
+                # heuristics: {rec:{naziv_fajla:[vrednost_heuristike, okolina_reci], ....}, rec2: {}}
+    word_not_found = True
+    for word in heuristics:
+        for filename in heuristics[word]:
+            if heuristics[word][filename][0] > 220:
+                word_not_found = False
+                break
+        if word_not_found:
+            suggest_word(word)
+            return
+    show_search_data(heuristics, n_pages)
 
-def ucitaj_sve_fajlove(putanja):
-    # ucitavanje svih HTML fajlova
-    # stavljanje u Graph i Trie
 
-    for fajl in os.listdir(putanja):
-        if fajl.startswith("."):
-            continue
-        if fajl.endswith(".html"):
-            putanja_fajla = putanja + SEPARATOR + fajl
-            lista_linkova_fajla, lista_reci_fajla = parser.parse(putanja_fajla)
-            if not lista_reci_fajla:  # ako je prazan fajl
-                continue
-            dopuni_autocomplete(lista_reci_fajla)
-            naziv_fajla = vrati_naziv_fajla(putanja_fajla)
-
-            # vrati podatke za Edges (ivice)
-            nazivi_linkova_fajlova = vrati_nazive_linkova_fajla(lista_linkova_fajla)
-            linkovi_fajlova[naziv_fajla] = nazivi_linkova_fajlova
-
-            # stvori Trie za date reci
-            trie_fajla = popuni_trie_datog_fajla(lista_reci_fajla, naziv_fajla)
-
-            # Vertex (cvor)
-            elemenat_cvora = {naziv_fajla: trie_fajla}
-            cvor = graf_fajlova.insert_vertex(elemenat_cvora)
-            objekti_cvorova[naziv_fajla] = cvor
-        elif not os.path.isfile(putanja + SEPARATOR + fajl) and not (
-                re.search("^.*.(js|JS|inv|INV|doc|DOC|pdf|PDF)$", fajl)):
-            ucitaj_sve_fajlove(putanja + SEPARATOR + fajl)
+def suggest_word(word):
+    word_suggestions = []
+    check_word = word[:-1]
+    check_word = check_word.lower()
+    for word in words_autocomplete:
+        if word.lower().startswith(check_word):
+            word_suggestions.append(word)
+    if len(check_word) == 1:
+        return word_suggestions
+    if not word_suggestions:
+        suggest_word(check_word)
+    else:
+        print("Da li ste mozda mislili na ove reci: ")
+        for i in range(len(word_suggestions)):
+            if i == 6:
+                break
+            print("    - "+word_suggestions[i])
+        return
 
 
-def upisi_edgeove():
-    print("---------------")
-    print("Upisani cvorovi!")
+def first_AND_check(operand_words):
+    word0_files = []
+    word1_files = []
+    result_files = []
+    word_index = 0
+    for word in operand_words:
+        word_index += 1
+        for key in objekti_cvorova:
+            search_word = word.lower()
+            vertex_trie = objekti_cvorova[key]._element[key]
+            num_repeats, _ = vertex_trie.search(search_word)
+            if num_repeats != 0 and word_index == 1:
+                word0_files.append(key)
+            elif num_repeats != 0 and word_index == 2:
+                word1_files.append(key)
+    for filename0 in word0_files:
+        for filename1 in word1_files:
+            if (filename0 == filename1) and (filename0 not in result_files):
+                result_files.append(filename0)
+    return result_files
 
-    # upis Edge-ova
-    for key in linkovi_fajlova:
-        for naziv_linka in linkovi_fajlova[key]:
-            if naziv_linka in objekti_cvorova:
-                graf_fajlova.insert_edge(objekti_cvorova[key], objekti_cvorova[naziv_linka], naziv_linka)
+def AND_check(filenames, word):
+    files_for_word = []
+    result_files = []
+    for key in objekti_cvorova:
+        word = word.lower()
+        vertex_trie = objekti_cvorova[key]._element[key]
+        num_repeats, _ = vertex_trie.search(word)
+        if num_repeats != 0:
+            files_for_word.append(key)
+    for filename in files_for_word:
+        if filename in filenames:
+            result_files.append(filename)
+    return result_files
 
-    print("Upisane ivice!")
-    print("---------------")
+
+def first_OR_check(operand_words):
+    word0_files = []
+    word1_files = []
+    result_files = []
+    word_index = 0
+    for word in operand_words:
+        word_index += 1
+        for key in objekti_cvorova:
+            search_word = word.lower()
+            vertex_trie = objekti_cvorova[key]._element[key]
+            num_repeats, _ = vertex_trie.search(search_word)
+            if num_repeats != 0 and word_index == 1:
+                word0_files.append(key)
+            elif num_repeats != 0 and word_index == 2:
+                word1_files.append(key)
+    for filename in word0_files:
+        if filename not in result_files:
+            result_files.append(filename)
+    for filename in word1_files:
+        if filename not in result_files:
+            result_files.append(filename)
+    return result_files
+
+def OR_check(filenames, word):
+    files_for_word = []
+    for key in objekti_cvorova:
+        word = word.lower()
+        vertex_trie = objekti_cvorova[key]._element[key]
+        num_repeats, _ = vertex_trie.search(word)
+        if num_repeats != 0:
+            files_for_word.append(key)
+    for filename in files_for_word:
+        if filename not in filenames:
+            filenames.append(filename)
+    return filenames
+
+
+def first_NOT_check(operand_words):
+    word0_files = []
+    word1_files = []
+    result_files = []
+    word_index = 0
+    for word in operand_words:
+        word_index += 1
+        for key in objekti_cvorova:
+            search_word = word.lower()
+            vertex_trie = objekti_cvorova[key]._element[key]
+            num_repeats, _ = vertex_trie.search(search_word)
+            if num_repeats != 0 and word_index == 1:
+                word0_files.append(key)
+            elif num_repeats == 0 and word_index == 2:
+                word1_files.append(key)
+    for filename0 in word0_files:
+        for filename1 in word1_files:
+            if (filename0 == filename1) and (filename0 not in result_files):
+                result_files.append(filename0)
+    return result_files
+
+def NOT_check(filenames, word):
+    files_for_word = []
+    result_files = []
+    for key in objekti_cvorova:
+        word = word.lower()
+        vertex_trie = objekti_cvorova[key]._element[key]
+        num_repeats, _ = vertex_trie.search(word)
+        if num_repeats == 0:
+            files_for_word.append(key)
+    for filename in files_for_word:
+        if filename in filenames:
+            result_files.append(filename)
+    return result_files
+
+
+def autocomplete_input():
+    prefix = input("Unesite prefiks za koji hocete da se obavi autocomplete: ")
+    while True:
+        show_n_words = input("Unesite koliko reci zelite da vam se prikaze: ")
+        if not show_n_words.isnumeric():
+            print("Neispravan unos broja reci.")
+        else:
+            words = find_autocomplete(prefix, show_n_words)
+            print_autocomplete(words)
+            break
+
+def find_autocomplete(prefix, suggestion_limit):
+    words_suggest = []
+    prefix = prefix.lower()
+    for word in words_autocomplete:
+        if (word.startswith(prefix)) and (word not in words_suggest):
+            words_suggest.append(word)
+            if len(words_suggest) == int(suggestion_limit):
+                break
+    return words_suggest
+
+def print_autocomplete(word_list):
+    print("Pronadjene reci: ")
+    for word in word_list:
+        print("    - " + word)
     print()
 
 
-def popuni_trie_datog_fajla(lista_reci_fajla, naziv_fajla):
-    trie = Trie()
-    for i in range(len(lista_reci_fajla)):  # mora po indeksu da bih znao gde je data rec u listi
-        if not lista_reci_fajla[i]:
-            continue
-        rec = lista_reci_fajla[i].lower()
-        lista_okruzenja_reci = napravi_okruzenje_date_reci(lista_reci_fajla, i)
-        trie.insert(rec, naziv_fajla, lista_okruzenja_reci)
-    return trie
-
-
-def dopuni_autocomplete(lista_reci):
-    for rec in lista_reci:
-        if rec.lower() not in reci_za_autocomplete:
-            reci_za_autocomplete.append(rec.lower())
-
-
-def napravi_okruzenje_date_reci(lista_reci_fajla, i):
-    lista_okruzenje_reci = []
-
-    # okruzenje reci je lista reci koje su oko te reci u HTML fajlu, povratna vrednost - lista reci
-
-    if i in range(len(lista_reci_fajla) - 20, len(lista_reci_fajla)):
-        for j in range(len(lista_reci_fajla) - 20, len(lista_reci_fajla)):
-            lista_okruzenje_reci.append(lista_reci_fajla[j])
-        return lista_okruzenje_reci
-
-    else:
-        for j in range(i, i + 20):
-            lista_okruzenje_reci.append(lista_reci_fajla[j])
-        return lista_okruzenje_reci
-
-
-def vrati_nazive_linkova_fajla(lista_linkova_fajla):
-    nazivi_linkova = []
-    for link in lista_linkova_fajla:
-        podaci_linka = link.split(SEPARATOR)
-        if podaci_linka[-1] not in nazivi_linkova:
-            nazivi_linkova.append(podaci_linka[-1])
-    return nazivi_linkova
-
-
-def vrati_naziv_fajla(putanja_fajla):
-    podaci_putanje_fajla = putanja_fajla.split(SEPARATOR)
-    return podaci_putanje_fajla[-1]
-
-
 if __name__ == '__main__':
-    pocetak_programa()
+    start_app()

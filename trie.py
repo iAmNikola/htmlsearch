@@ -5,7 +5,7 @@ class TrieNode:
         self.end_here = False
         self.file_path = None
         self.surroundings = []
-        self.broj_ponavljanja = 0
+        self.repeats = 0
 
 
 class Trie:
@@ -25,16 +25,16 @@ class Trie:
                 parent.file_path = file_path
                 # ovako nesto da se zna sta je oko te reci
                 parent.surroundings.append(surroundings)
-                parent.broj_ponavljanja += 1
+                parent.repeats += 1
 
     def search(self, word):
-        # pronadji rec u trie, argument: word, povratna_vrednost: boolean
+        # pronadji rec u trie, argument: word
         parent = self.root
         for char in word:
             if char not in parent.children:
                 return 0, []
             parent = parent.children[char]
-        return parent.broj_ponavljanja, parent.surroundings
+        return parent.repeats, parent.surroundings
 
     def starts_with(self, prefix):
         # autocomplete
